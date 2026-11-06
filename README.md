@@ -2,9 +2,8 @@
 
 **A private search engine and launcher that runs entirely in the browser. No server, no tracking, no query logs.**
 
-**Live demo:** https://YOUR-USERNAME.github.io/hush-search/
+**Live demo:** https://ridafatimazulfiqar.github.io/private-search-engine/
 
-## For recruiters: 60-second summary
 **What I built:** a working private search engine. It indexes documents with an inverted index, ranks them with the BM25 algorithm used by Elasticsearch and Lucene, and shows highlighted snippets. A smart address bar also opens websites, app downloads and searches on Google, DuckDuckGo, YouTube and GitHub without sending data to any server of mine.
 
 **Problem:** mainstream search engines log queries and build profiles of users. This project shows a transparent alternative where I can point to the exact code that handles every query.

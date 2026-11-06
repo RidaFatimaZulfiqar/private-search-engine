@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<!--
+  Hush Search: a private search engine and launcher in one file.
+  Engine:   tokenize -> stop words -> stem -> inverted index -> BM25 -> snippets
+  Launcher: direct() reads the input and opens a site, a download page or a search
+  Privacy:  no server, no analytics, no query logs; links use noopener,noreferrer
+  Docs:     see README.md and docs/DOCUMENTATION.md
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hush Search – private search launcher for Google and developer sites</title>
+<meta name="description" content="Hush Search is a private search engine with a BM25-ranked inverted index. No server, no tracking, no query logs.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔎</text></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#eef2f4;--surface:#fff;--ink:#14202b;--muted:#5b6b78;--line:#d3dde3;--accent:#0f6b63;--accent-ink:#fff;--mark:#ffe58a}
+@media (prefers-color-scheme:dark){:root{--bg:#0e161c;--surface:#16212a;--ink:#e6edf1;--muted:#94a5b1;--line:#273642;--accent:#4fd1c0;--accent-ink:#06211e;--mark:#5a4a00}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+.wrap{max-width:760px;margin:0 auto;padding:0 20px}
+header{padding:56px 0 24px}
+h1{font:700 clamp(2.2rem,7vw,3.4rem)/1.05 "Bricolage Grotesque",system-ui,sans-serif;margin:0 0 10px;letter-spacing:-.02em}
+.sub{color:var(--muted);margin:0 0 24px;max-width:56ch}
+form.search{display:flex;gap:8px}
+select{font:inherit;color:var(--ink);background:var(--surface);border:1.5px solid var(--line);border-radius:10px;padding:0 12px;min-height:46px}
+input[type=search],input[type=text],input[type=url],textarea{width:100%;font:inherit;color:var(--ink);background:var(--surface);border:1.5px solid var(--line);border-radius:10px;padding:13px 14px}
+input:focus,textarea:focus,button:focus-visible,summary:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+button{font:inherit;font-weight:600;border:0;border-radius:10px;padding:0 20px;background:var(--accent);color:var(--accent-ink);cursor:pointer;min-height:46px}
+button.ghost{background:transparent;color:var(--ink);border:1.5px solid var(--line)}
+.meta{color:var(--muted);font-size:.9rem;margin:18px 0 6px;min-height:1.4em}
+.result{padding:16px 0;border-bottom:1px solid var(--line)}
+.result a{font:700 1.15rem/1.3 "Bricolage Grotesque",system-ui,sans-serif;color:var(--accent);text-decoration:none}
+.result a:hover{text-decoration:underline}
+.url{font-size:.82rem;color:var(--muted);word-break:break-all}
+.snip{margin:4px 0 0}
+.score{font-size:.78rem;color:var(--muted)}
+mark{background:var(--mark);color:inherit;border-radius:3px;padding:0 2px}
+.empty{padding:28px 0;color:var(--muted)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:10px;margin-top:18px}
+.tiles a{display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 6px;background:var(--surface);border:1.5px solid var(--line);border-radius:12px;color:var(--ink);text-decoration:none;font-size:.85rem;font-weight:600}
+.tiles a span{font-size:1.5rem;line-height:1}
+.tiles a:hover{border-color:var(--accent)}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.chips button{min-height:34px;padding:0 14px;font-weight:500;background:var(--surface);color:var(--ink);border:1.5px solid var(--line);border-radius:99px}
+section.panel{margin:36px 0;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:6px 20px}
+summary{cursor:pointer;font-weight:700;padding:14px 0}
+.panel label{display:block;font-weight:600;margin:12px 0 4px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 18px}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:12px 0 16px}
+.facts div{border-left:3px solid var(--accent);padding-left:10px}
+.facts b{display:block;font:700 1.5rem "Bricolage Grotesque",system-ui,sans-serif}
+.facts span{color:var(--muted);font-size:.85rem}
+footer{padding:12px 0 48px;color:var(--muted);font-size:.88rem}
+footer a{color:var(--accent)}
+@media (max-width:600px){form.search{flex-direction:column}}
+@media (prefers-reduced-motion:no-preference){.result{animation:in .25s ease-out}@keyframes in{from{opacity:0}to{opacity:1}}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>Hush Search</h1>
+  <p class="sub">Type anything: a search, a website (youtube, instagram.com), or “download python”. Hush opens it in a new tab. No server, no logs, no tracking. Sites open in a new tab because Google, WhatsApp and Instagram do not allow themselves to be embedded in other pages.</p>
+  <form class="search" id="f" role="search">
+    <select id="eng" aria-label="Search where"><option value="local">My private index</option><option value="google">Google</option><option value="ddg">DuckDuckGo</option><option value="bing">Bing</option><option value="brave">Brave Search</option><option value="so">Stack Overflow</option><option value="gh">GitHub</option><option value="mdn">MDN Web Docs</option><option value="npm">npm</option><option value="yt">YouTube</option></select>
+    <input type="search" id="q" placeholder="Search or open a site: youtube, instagram.com, download python" aria-label="Search query" autocomplete="off" autofocus>
+    <button type="submit">Search</button>
+  </form>
+  <div class="chips" id="chips"></div>
+  <nav class="tiles" id="tiles" aria-label="Quick launch"></nav>
+</header>
+
+<main>
+  <div class="meta" id="meta" aria-live="polite"></div>
+  <div id="results"></div>
+</main>
+
+<section class="panel">
+  <details>
+    <summary>Index stats and how it works</summary>
+    <div class="facts">
+      <div><b id="sDocs">0</b><span>documents</span></div>
+      <div><b id="sTerms">0</b><span>unique terms</span></div>
+      <div><b id="sTime">–</b><span>last query (ms)</span></div>
+    </div>
+    <p>Pipeline: <b>tokenize</b> → drop stop words → light <b>stemming</b> → <b>inverted index</b> (term → documents) → <b>BM25</b> ranking (k1 = 1.5, b = 0.75) → snippet with highlighted matches. Everything is plain JavaScript in this one file.</p>
+  </details>
+</section>
+
+<section class="panel">
+  <details>
+    <summary>Add your own documents</summary>
+    <form id="add">
+      <label for="t">Title</label><input type="text" id="t" required>
+      <label for="u">Link (optional)</label><input type="url" id="u" placeholder="https://">
+      <label for="x">Text</label><textarea id="x" rows="5" required></textarea>
+      <div class="row"><button type="submit">Add to index</button>
+      <button type="button" class="ghost" id="exp">Export JSON</button>
+      <button type="button" class="ghost" id="imp">Import JSON</button>
+      <button type="button" class="ghost" id="rst">Reset to samples</button></div>
+      <input type="file" id="file" accept="application/json" hidden>
+    </form>
+    <p class="meta">Saved only in this browser (localStorage).</p>
+  </details>
+</section>
+</div>
+
+<footer><div class="wrap">Built as a school/college project. Source on <a href="https://github.com/YOUR-USERNAME/hush-search">GitHub</a>.</div></footer>
+
+<script>
+const SAMPLE=[
+{title:"What is an inverted index?",url:"https://en.wikipedia.org/wiki/Inverted_index",text:"An inverted index maps each word to the list of documents that contain it. Instead of scanning every page for a query, a search engine looks up each query term and merges the posting lists. It is the core data structure behind Lucene, Elasticsearch and SQLite FTS5."},
+{title:"Okapi BM25 ranking explained",url:"https://en.wikipedia.org/wiki/Okapi_BM25",text:"BM25 is a ranking function that scores documents by term frequency, inverse document frequency and document length. Unlike plain TF-IDF it saturates term frequency, so repeating a word many times gives diminishing returns. The parameters k1 and b control saturation and length normalization."},
+{title:"How web crawlers work",url:"https://en.wikipedia.org/wiki/Web_crawler",text:"A web crawler starts from seed URLs, downloads pages, extracts links and adds them to a queue. Polite crawlers respect robots.txt, limit request rates and avoid fetching the same URL twice. Crawled HTML is then cleaned and passed to the indexer."},
+{title:"Why private search matters",url:"https://duckduckgo.com/privacy",text:"Mainstream search engines log queries, IP addresses and click behavior to build advertising profiles. Private search engines avoid storing personal data, do not personalize results and do not track users across sites. Self-hosting gives even more control over your data."},
+{title:"Stemming and stop words",url:"https://en.wikipedia.org/wiki/Stemming",text:"Text preprocessing improves search quality. Stop words such as the and of carry little meaning and are removed. Stemming reduces running, runs and runner toward a common root so that a query matches different word forms."},
+{title:"SearXNG: a self-hosted metasearch engine",url:"https://github.com/searxng/searxng",text:"SearXNG is a free open source metasearch engine that aggregates results from many search services without tracking users. You can run your own instance with Docker and customize the engines and interface."},
+{title:"Semantic search with embeddings",url:"https://www.sbert.net/",text:"Semantic search converts text into dense vectors called embeddings and finds the nearest vectors to the query. It matches meaning rather than exact keywords, so a query about cars can find a document about automobiles. Vector databases such as FAISS and Chroma make this fast."},
+{title:"PageRank and link analysis",url:"https://en.wikipedia.org/wiki/PageRank",text:"PageRank estimates the importance of a page from the links pointing to it. A link from an important page counts more than a link from an obscure one. Modern ranking combines link analysis with text relevance and many other signals."},
+{title:"Hosting a static site on GitHub Pages",url:"https://pages.github.com/",text:"GitHub Pages serves static HTML, CSS and JavaScript directly from a repository for free. Push an index.html to your repository, enable Pages in the settings and your project is live on the web. It is an easy way to share a portfolio project on LinkedIn."},
+{title:"Full stack development roadmap",url:"https://roadmap.sh/full-stack",text:"A full stack developer works on both the front end and the back end. Start with HTML, CSS and JavaScript, then learn a framework such as React. On the server side learn Node.js and Express, a database such as PostgreSQL or MongoDB, REST APIs, authentication with JWT, Git, Docker and deployment."},
+{title:"Building a REST API with Node.js and Express",url:"https://expressjs.com/",text:"Express is a minimal Node.js framework for building REST APIs. Define routes for GET, POST, PUT and DELETE, parse JSON bodies with middleware, connect to a database and return proper status codes. Add validation, error handling and authentication before deploying."},
+{title:"SQL vs NoSQL databases",url:"https://www.mongodb.com/nosql-explained",text:"Relational databases such as PostgreSQL store data in tables with strict schemas and support joins and transactions. NoSQL databases such as MongoDB store flexible documents and scale horizontally. Choose based on how structured your data is and how you query it."},
+{title:"Encrypting data at rest",url:"https://en.wikipedia.org/wiki/Data_at_rest",text:"Encryption at rest protects stored data if a device is lost or stolen. A private search index can be encrypted with a key derived from a passphrase, so that only the owner can read the indexed documents."}
+];
+const STOP=new Set("a an and are as at be but by for from has have he her his how i if in into is it its of on or our she so that the their them then there these they this to was we were what when where which who why will with you your do does did can could not no".split(" "));
+const KEY="hush-docs-v2";
+const SITES={whatsapp:"https://web.whatsapp.com/",instagram:"https://www.instagram.com/",insta:"https://www.instagram.com/",youtube:"https://www.youtube.com/",yt:"https://www.youtube.com/",gmail:"https://mail.google.com/",facebook:"https://www.facebook.com/",fb:"https://www.facebook.com/",twitter:"https://x.com/",x:"https://x.com/",linkedin:"https://www.linkedin.com/",github:"https://github.com/",maps:"https://maps.google.com/","google maps":"https://maps.google.com/",google:"https://www.google.com/",drive:"https://drive.google.com/",translate:"https://translate.google.com/",telegram:"https://web.telegram.org/",netflix:"https://www.netflix.com/",spotify:"https://open.spotify.com/",amazon:"https://www.amazon.in/",flipkart:"https://www.flipkart.com/","play store":"https://play.google.com/store/apps",playstore:"https://play.google.com/store/apps","app store":"https://apps.apple.com/"};
+const DL={python:"https://www.python.org/downloads/",chrome:"https://www.google.com/chrome/",vscode:"https://code.visualstudio.com/download","vs code":"https://code.visualstudio.com/download",node:"https://nodejs.org/en/download",nodejs:"https://nodejs.org/en/download",git:"https://git-scm.com/downloads",docker:"https://www.docker.com/products/docker-desktop/",java:"https://www.oracle.com/java/technologies/downloads/",firefox:"https://www.mozilla.org/firefox/new/"};
+const BANGS={g:"google",ddg:"ddg",b:"bing",yt:"yt",gh:"gh",so:"so",mdn:"mdn",npm:"npm"};
+const LAUNCH=[["💬","WhatsApp","whatsapp"],["📸","Instagram","instagram"],["▶️","YouTube","youtube"],["✉️","Gmail","gmail"],["🗺️","Maps","maps"],["📱","Play Store","play store"],["👥","Facebook","facebook"],["𝕏","X","x"],["💼","LinkedIn","linkedin"],["🐙","GitHub","github"],["✈️","Telegram","telegram"],["🐍","Python","download python"]];
+const NOTLD=/\.(js|ts|py|md|json|txt|css|html|jsx|tsx)$/i;
+function direct(t){
+  const l=t.toLowerCase();
+  if(/^https?:\/\/\S+$/i.test(t))return [t,t];
+  if(/^([a-z0-9-]+\.)+[a-z]{2,}(\/\S*)?$/i.test(t)&&!NOTLD.test(t))return ["https://"+t,t];
+  if(SITES[l])return [SITES[l],l];
+  let m=l.match(/^(?:download|install)\s+(.+?)(?:\s+(?:app|apk|for android|for windows))?$/);
+  if(m){const a=m[1];if(DL[a])return [DL[a],a+" download page"];return ["https://play.google.com/store/search?c=apps&q="+encodeURIComponent(a),a+" on Play Store"];}
+  m=t.match(/^!(\w+)\s+(.+)$/);
+  if(m&&BANGS[m[1].toLowerCase()])return [URLS[BANGS[m[1].toLowerCase()]]+encodeURIComponent(m[2]),m[2]+" on "+m[1]];
+  return null;
+}
+const URLS={google:"https://www.google.com/search?q=",ddg:"https://duckduckgo.com/?q=",bing:"https://www.bing.com/search?q=",brave:"https://search.brave.com/search?q=",so:"https://stackoverflow.com/search?q=",gh:"https://github.com/search?q=",mdn:"https://developer.mozilla.org/en-US/search?q=",npm:"https://www.npmjs.com/search?q=",yt:"https://www.youtube.com/results?search_query="};
+let docs=[],index=new Map(),lens=[],avg=0;
+
+function stem(w){
+  for(const [s,r] of [["ing",""],["edly",""],["ed",""],["ies","y"],["es",""],["s",""],["ly",""]])
+    if(w.length>s.length+3&&w.endsWith(s)) return w.slice(0,-s.length)+r;
+  return w;
+}
+const tokens=t=>(t.toLowerCase().match(/[a-z0-9]+/g)||[]).filter(w=>!STOP.has(w)).map(stem);
+
+function build(){
+  index=new Map();lens=[];
+  docs.forEach((d,i)=>{
+    const tk=tokens(d.title+" "+d.title+" "+d.text);
+    lens[i]=tk.length;
+    const tf=new Map();tk.forEach(t=>tf.set(t,(tf.get(t)||0)+1));
+    tf.forEach((n,t)=>{if(!index.has(t))index.set(t,[]);index.get(t).push([i,n]);});
+  });
+  avg=lens.reduce((a,b)=>a+b,0)/(lens.length||1);
+  sDocs.textContent=docs.length;sTerms.textContent=index.size;
+}
+function search(q){
+  const k1=1.5,b=0.75,N=docs.length,sc=new Map(),qt=[...new Set(tokens(q))];
+  qt.forEach(t=>{
+    const p=index.get(t);if(!p)return;
+    const idf=Math.log(1+(N-p.length+.5)/(p.length+.5));
+    p.forEach(([i,f])=>sc.set(i,(sc.get(i)||0)+idf*f*(k1+1)/(f+k1*(1-b+b*lens[i]/avg))));
+  });
+  return {qt,hits:[...sc].sort((a,b)=>b[1]-a[1])};
+}
+const esc=s=>s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function hl(text,qt){
+  return esc(text).replace(/[A-Za-z0-9]+/g,w=>qt.includes(stem(w.toLowerCase()))?"<mark>"+w+"</mark>":w);
+}
+function snippet(text,qt){
+  const s=text.split(/(?<=[.!?])\s+/);
+  let best=0,bs=-1;
+  s.forEach((x,i)=>{const n=tokens(x).filter(t=>qt.includes(t)).length;if(n>bs){bs=n;best=i;}});
+  let out=s[best];if(out.length>220)out=out.slice(0,220)+"…";
+  return hl(out,qt);
+}
+function run(q){
+  q=q.trim();
+  if(!q){results.innerHTML="";meta.textContent="";return;}
+  const t0=performance.now(),{qt,hits}=search(q),ms=performance.now()-t0;
+  sTime.textContent=ms.toFixed(2);
+  meta.textContent=hits.length?hits.length+" result"+(hits.length>1?"s":"")+" in "+ms.toFixed(2)+" ms":"";
+  results.innerHTML=hits.length?hits.slice(0,20).map(([i,s])=>{
+    const d=docs[i];
+    const title=d.url?'<a href="'+esc(d.url)+'" target="_blank" rel="noopener noreferrer">'+hl(d.title,qt)+'</a>':'<a>'+hl(d.title,qt)+'</a>';
+    return '<article class="result">'+title+(d.url?'<div class="url">'+esc(d.url)+'</div>':'')+'<p class="snip">'+snippet(d.text,qt)+'</p><span class="score">BM25 score '+s.toFixed(2)+'</span></article>';
+  }).join(""):'<div class="empty">No documents match “'+esc(q)+'”. Try fewer or different words, or add a document below.</div>';
+}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(docs));}catch(e){}}
+function load(){try{const r=JSON.parse(localStorage.getItem(KEY));if(Array.isArray(r)&&r.length)return r;}catch(e){}return SAMPLE.slice();}
+
+try{eng.value=localStorage.getItem("hush-engine")||"local";}catch(e){}
+function openTab(u){const a=document.createElement("a");a.href=u;a.target="_blank";a.rel="noopener noreferrer";document.body.appendChild(a);a.click();a.remove();}
+function go(term){
+  term=term.trim();if(!term)return;
+  try{localStorage.setItem("hush-engine",eng.value);}catch(e){}
+  const d=direct(term);
+  if(d){meta.textContent="Opened "+d[1]+" in a new tab. If nothing opened, allow pop-ups for this site.";results.innerHTML="";openTab(d[0]);return;}
+  if(eng.value==="local"){run(term);return;}
+  results.innerHTML="";
+  meta.textContent="Opened “"+term+"” on "+eng.options[eng.selectedIndex].text+" in a new tab. If nothing opened, allow pop-ups for this site.";
+  openTab(URLS[eng.value]+encodeURIComponent(term));
+}
+f.onsubmit=e=>{e.preventDefault();go(q.value);};
+q.oninput=()=>{if(eng.value==="local")run(q.value);};
+eng.onchange=()=>{results.innerHTML="";meta.textContent="";try{localStorage.setItem("hush-engine",eng.value);}catch(e){}};
+["full stack development roadmap","React hooks tutorial","Node.js REST API","PostgreSQL vs MongoDB","Docker for beginners","JWT authentication"].forEach(s=>{
+  const b=document.createElement("button");b.type="button";b.textContent=s;b.onclick=()=>{q.value=s;go(s);};chips.appendChild(b);
+});
+add.onsubmit=e=>{
+  e.preventDefault();
+  docs.push({title:t.value.trim(),url:u.value.trim(),text:x.value.trim()});
+  save();build();add.reset();meta.textContent="Added. The index now holds "+docs.length+" documents.";
+};
+exp.onclick=()=>{
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([JSON.stringify(docs,null,2)],{type:"application/json"}));
+  a.download="hush-index.json";a.click();
+};
+imp.onclick=()=>file.click();
+file.onchange=async()=>{
+  try{const r=JSON.parse(await file.files[0].text());
+    if(!Array.isArray(r)||!r.every(d=>d.title&&d.text))throw 0;
+    docs=r;save();build();meta.textContent="Imported "+docs.length+" documents.";
+  }catch(e){meta.textContent="Import failed. Use a JSON array of {title, url, text} objects.";}
+  file.value="";
+};
+rst.onclick=()=>{docs=SAMPLE.slice();save();build();results.innerHTML="";meta.textContent="Index reset to the sample documents.";};
+
+LAUNCH.forEach(([i,n,k])=>{
+  const a=document.createElement("a");a.href="#";a.innerHTML="<span>"+i+"</span>"+n;
+  a.onclick=e=>{e.preventDefault();q.value=k;go(k);};tiles.appendChild(a);
+});
+docs=load();build();
+</script>
+</body>
+</html>
